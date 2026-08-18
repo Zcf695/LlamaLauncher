@@ -19,6 +19,14 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    - name: 设置 Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: 安装 Android SDK 组件
+      run: |
+        sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        yes | sdkmanager --licenses
+
     - name: 安装 Android NDK
       uses: nttld/setup-ndk@v1
       with:
@@ -37,23 +45,15 @@ jobs:
           -DLLAMA_CURL=OFF \
           -DLLAMA_BUILD_SERVER=ON
         cmake --build . --config Release -j$(nproc)
-        # 重命名为 .so（Android 要求）
         mkdir -p ../../app/src/main/jniLibs/arm64-v8a
         cp bin/llama-server ../../app/src/main/jniLibs/arm64-v8a/libllama_server.so
         cd ../..
         echo "llama-server 编译完成"
         ls -lh app/src/main/jniLibs/arm64-v8a/
 
-    - name: 安装 Gradle
-      uses: gradle/actions/setup-gradle@v3
-      with:
-        gradle-version: '8.5'
-
-    - name: 生成 Gradle Wrapper
-      run: gradle wrapper --gradle-version 8.5
-
     - name: 编译 APK
       run: |
+        gradle wrapper --gradle-version 8.5
         chmod +x gradlew
         ./gradlew assembleDebug --stacktrace
 
