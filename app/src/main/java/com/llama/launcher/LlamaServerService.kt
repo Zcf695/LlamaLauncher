@@ -72,7 +72,6 @@ class LlamaServerService : Service() {
             "--port", port.toString(),
         )
         if (enableJinja) cmd.add("--jinja")
-        if (enableCacheRot) cmd.add("--cache-all-rot")
         if (enableMlock) cmd.add("--mlock")
 
         // 唤醒锁
@@ -98,10 +97,18 @@ class LlamaServerService : Service() {
                 }
             }
 
-            // 状态监控
-            startMonitoring()
-
-            broadcastStatus(STATUS_RUNNING)
+            // 等待3秒检查进程是否存活
+            CoroutineScope(Dispatchers.IO).launch {
+                delay(3000)
+                if (serverProcess?.isAlive == true) {
+                    broadcastStatus(STATUS_RUNNING)
+                    startMonitoring()
+                } else {
+                    val exitCode = try { serverProcess?.exitValue() } catch (_: Exception) { -1 }
+                    broadcastStatus(STATUS_ERROR, "进程启动失败，退出码: $exitCode")
+                    stopSelf()
+                }
+            }
         } catch (e: Exception) {
             broadcastStatus(STATUS_ERROR, e.message ?: "启动失败")
             stopSelf()
