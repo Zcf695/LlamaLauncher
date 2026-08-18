@@ -50,9 +50,12 @@ class MainActivity : AppCompatActivity() {
             when (intent?.action) {
                 LlamaServerService.BROADCAST_STATUS -> handleStatus(intent)
                 LlamaServerService.BROADCAST_MEMORY -> handleMemory(intent)
+                LlamaServerService.BROADCAST_LOG -> handleLog(intent)
             }
         }
     }
+
+    private val serverLogs = mutableListOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -201,6 +204,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startServer() {
         saveSettings()
+        serverLogs.clear()
 
         if (settings.modelPath.isEmpty()) {
             Toast.makeText(this, "请先选择模型文件", Toast.LENGTH_SHORT).show()
@@ -252,6 +256,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleLog(intent: Intent) {
+        val log = intent.getStringExtra(LlamaServerService.EXTRA_LOG) ?: return
+        serverLogs.add(log)
+        if (serverLogs.size > 50) serverLogs.removeAt(0)
+    }
+
     private fun updateStatus(status: String, message: String = "") {
         when (status) {
             LlamaServerService.STATUS_RUNNING -> {
@@ -280,7 +290,8 @@ class MainActivity : AppCompatActivity() {
             }
             LlamaServerService.STATUS_ERROR -> {
                 isRunning = false
-                binding.statusText.text = "${getString(R.string.status_error)}: $message"
+                val logInfo = if (serverLogs.isNotEmpty()) "\n最近日志:\n" + serverLogs.takeLast(5).joinToString("\n") else ""
+                binding.statusText.text = "${getString(R.string.status_error)}: $message$logInfo"
                 binding.statusIndicator.setBackgroundColor(getColor(R.color.accent_red))
                 binding.startButton.text = getString(R.string.btn_start)
                 binding.startButton.setBackgroundTintList(getColorStateList(R.color.accent_green))
@@ -300,7 +311,22 @@ class MainActivity : AppCompatActivity() {
     private fun getLocalIpAddress(): String {
         return try {
             val interfaces = NetworkInterface.getNetworkInterfaces()
+            // 优先找 wlan0
             for (iface in interfaces) {
+                if (iface.name == "wlan0" && !iface.isLoopback && iface.isUp) {
+                    for (addr in iface.inetAddresses) {
+                        if (!addr.isLoopbackAddress && addr is InetAddress) {
+                            val sAddr = addr.hostAddress
+                            if (sAddr != null && sAddr.indexOf(':') < 0) {
+                                return sAddr
+                            }
+                        }
+                    }
+                }
+            }
+            // wlan0 没找到，遍历其他接口
+            val interfaces2 = NetworkInterface.getNetworkInterfaces()
+            for (iface in interfaces2) {
                 if (iface.isLoopback || !iface.isUp) continue
                 for (addr in iface.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is InetAddress) {
@@ -346,6 +372,7 @@ class MainActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(LlamaServerService.BROADCAST_STATUS)
             addAction(LlamaServerService.BROADCAST_MEMORY)
+            addAction(LlamaServerService.BROADCAST_LOG)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
