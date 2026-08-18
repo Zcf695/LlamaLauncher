@@ -6,13 +6,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.text.format.Formatter
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.SeekBar
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -22,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
 
@@ -29,8 +35,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var settings: SettingsManager
-    private lateinit var modelScanner: ModelScanner
-    private var foundModels = listOf<ModelScanner.ModelFile>()
+    private var selectedModelPath: String? = null
+
+    // 文件选择器
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { copyModelToAppStorage(it) }
+    }
     private var isRunning = false
 
     private val receiver = object : BroadcastReceiver() {
@@ -48,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         settings = SettingsManager(this)
-        modelScanner = ModelScanner(this)
+        updateModelDisplay()
 
         setupUI()
         loadSettings()
@@ -76,9 +88,9 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
 
-        // 扫描模型按钮
+        // 选择模型按钮
         binding.scanButton.setOnClickListener {
-            scanModels()
+            openFilePicker()
         }
 
         // 启动/停止按钮
@@ -131,34 +143,59 @@ class MainActivity : AppCompatActivity() {
         settings.enableMlock = binding.mlockSwitch.isChecked
         settings.enableWakeLock = binding.wakeLockSwitch.isChecked
 
-        if (foundModels.isNotEmpty() && binding.modelSpinner.selectedItemPosition >= 0) {
-            settings.modelPath = foundModels[binding.modelSpinner.selectedItemPosition].path
+        selectedModelPath?.let { settings.modelPath = it }
+    }
+
+    private fun openFilePicker() {
+        filePickerLauncher.launch(arrayOf("*/*"))
+    }
+
+    private fun copyModelToAppStorage(uri: Uri) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val fileName = contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    cursor.moveToFirst()
+                    if (nameIndex >= 0) cursor.getString(nameIndex) else "model.gguf"
+                } ?: "model.gguf"
+
+                val modelsDir = File(getExternalFilesDir(null), "models")
+                if (!modelsDir.exists()) modelsDir.mkdirs()
+                val destFile = File(modelsDir, fileName)
+
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                selectedModelPath = destFile.absolutePath
+                settings.modelPath = destFile.absolutePath
+
+                withContext(Dispatchers.Main) {
+                    updateModelDisplay()
+                    Toast.makeText(this@MainActivity, "模型已选择: $fileName", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "选择失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
-    private fun scanModels() {
-        CoroutineScope(Dispatchers.IO).launch {
-            val models = modelScanner.scan()
-            withContext(Dispatchers.Main) {
-                foundModels = models
-                if (models.isEmpty()) {
-                    Toast.makeText(this@MainActivity, R.string.no_model_found, Toast.LENGTH_LONG).show()
-                } else {
-                    val adapter = ArrayAdapter(
-                        this@MainActivity, android.R.layout.simple_spinner_item,
-                        models.map { "${it.name} (${modelScanner.formatSize(it.size)})" }
-                    )
-                    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                    binding.modelSpinner.adapter = adapter
-
-                    // 选中已保存的模型
-                    if (settings.modelPath.isNotEmpty()) {
-                        val idx = models.indexOfFirst { it.path == settings.modelPath }
-                        if (idx >= 0) binding.modelSpinner.setSelection(idx)
-                    }
-                    Toast.makeText(this@MainActivity, "找到 ${models.size} 个模型", Toast.LENGTH_SHORT).show()
-                }
-            }
+    private fun updateModelDisplay() {
+        val path = settings.modelPath
+        if (path.isNotEmpty()) {
+            val file = File(path)
+            val sizeStr = if (file.exists()) {
+                Formatter.formatFileSize(this@MainActivity, file.length())
+            } else "文件不存在"
+            binding.modelSpinner.adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_item,
+                listOf("${file.name} ($sizeStr)")
+            )
+            binding.modelSpinner.setSelection(0)
         }
     }
 
@@ -264,7 +301,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-     private fun checkPermission() {
+    private fun checkPermission() {
         // 通知权限（Android 13+ 必须，前台服务需要）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
