@@ -264,17 +264,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkPermission() {
+     private fun checkPermission() {
+        // 通知权限（Android 13+ 必须，前台服务需要）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_DOCUMENTS)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(
                     this,
-                    arrayOf(Manifest.permission.READ_MEDIA_DOCUMENTS, Manifest.permission.POST_NOTIFICATIONS),
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                     REQUEST_PERMISSIONS
                 )
             }
-        } else {
+        }
+        // 存储权限（Android 12 及以下）
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(
