@@ -38,6 +38,7 @@ jobs:
           -DLLAMA_BUILD_SERVER=ON
         cmake --build . --config Release -j$(nproc)
         # 重命名为 .so（Android 要求）
+        mkdir -p ../../app/src/main/jniLibs/arm64-v8a
         cp bin/llama-server ../../app/src/main/jniLibs/arm64-v8a/libllama_server.so
         cd ../..
         echo "llama-server 编译完成"
