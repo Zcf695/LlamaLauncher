@@ -207,9 +207,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val binaryPath = getBinaryPath()
-        if (!File(binaryPath).exists()) {
-            Toast.makeText(this, "llama-server 二进制文件不存在，请先放置到 jniLibs/arm64-v8a/", Toast.LENGTH_LONG).show()
+        val binaryPath = ensureBinary()
+        if (binaryPath == null) {
+            Toast.makeText(this, "llama-server 二进制文件解压失败", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -217,9 +217,25 @@ class MainActivity : AppCompatActivity() {
         updateStatus(LlamaServerService.STATUS_STARTING)
     }
 
-    private fun getBinaryPath(): String {
-        // 优先使用应用内打包的二进制
-        return File(applicationInfo.nativeLibraryDir, "libllama_server.so").absolutePath
+    private fun ensureBinary(): String? {
+        val destFile = File(filesDir, "llama-server")
+        // 如果已存在且大小>0，直接返回
+        if (destFile.exists() && destFile.length() > 0) {
+            destFile.setExecutable(true)
+            return destFile.absolutePath
+        }
+        // 从 assets 复制
+        return try {
+            assets.open("llama-server").use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            destFile.setExecutable(true)
+            destFile.absolutePath
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun handleStatus(intent: Intent) {
